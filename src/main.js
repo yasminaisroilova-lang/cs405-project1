@@ -9,7 +9,7 @@ import './ui/style.css';
 import { initWebGPU, showFatal } from './render/gpu.js';
 import { Renderer } from './render/renderer.js';
 import { Painting } from './render/painting.js';
-import { createCamera, viewProjection } from './scene/camera.js';
+import { createCamera, viewProjection, frustumCorners } from './scene/camera.js';
 import { createScene } from './scene/scene.js';
 import { createPanel } from './ui/panel.js';
 import { Stats } from './ui/stats.js';
@@ -45,9 +45,12 @@ async function main() {
     });
 
   const camera = createCamera();
+  const inspectCam = { ...createCamera(), eye: [3, 2, 4], target: [0, 0, 0] };
+  let view = 'main';
   const cf = panel.folder('Camera');
   const camStatus = cf.text('');
   cf.select('projection', ['perspective', 'orthographic'], camera.projection, (v) => (camera.projection = v));
+  cf.select('view', ['main', 'inspection'], view, (v) => (view = v));
   const camReadout = cf.text('');
 
   const scene = createScene({ gpu, renderer, painting, panel });
@@ -58,10 +61,31 @@ async function main() {
 
   /* -------------- input --------------- */
   attachPointer(canvas, {
-    // TODO (Part C): orbit the camera on drag, zoom on wheel.
     // TODO (Part D): pick / drag control points on the painting.
-    drag(e) {},
-    wheel(e) {},
+    drag(e) {
+      camera.yaw -= e.dx * 0.01;
+      camera.pitch += e.dy * 0.01;
+      camera.Math.max(-1.5, Math.min(1.5, camera.pitch));
+      const r = camera.dist;
+      const x = r * Math.cos(camera.pitch) * Math.sin(camera.yaw);
+      const y = r * Math.sin(camera.pitch);
+      const z = r * Math.cos(camera.pitch) * Math.cos(camera.yaw);
+      camera.eye[0] = camera.target[0] + x;
+      camera.eye[1] = camera.target[1] + y;
+      camera.eye[2] = camera.target[2] + z;
+    },
+
+    wheel(e) {
+      camera.dist -= e.delta * 0.005;
+      camera.dist = Math.max(0.5, Math.min(20, camera.dist));
+      const r = camera.dist;
+      const x = r * Math.cos(camera.pitch) * Math.sin(camera.yaw);
+      const y = r * Math.sin(camera.pitch);
+      const z = r * Math.cos(camera.pitch) * Math.cos(camera.yaw);
+      camera.eye[0] = camera.target[0] + x;
+      camera.eye[1] = camera.target[1] + y;
+      camera.eye[2] = camera.target[2] + z;
+    },
   });
 
   /* ------------ render loop ----------- */
@@ -73,8 +97,9 @@ async function main() {
 
     scene.update(dt, now / 1000);
 
+    const activeCam = view === 'inspection' ? inspectCam : camera;
     const aspect = canvas.width / canvas.height;
-    const vp = viewProjection(camera, aspect, painting.aspect);
+    const vp = viewProjection(activeCam, aspect, painting.aspect);
     camStatus.set(vp.fallback
       ? `PLACEHOLDER view (no camera yet)\n${vp.missing}`
       : `camera: P · V (${camera.projection})`);
@@ -86,6 +111,7 @@ async function main() {
     );
 
     const paintingMVP = vp.fallback ? vp.matrix : mat4.multiply(vp.matrix, painting.model);
+    scene.setFrustum(view === 'inspection' ? frustumCorners(camera, aspect) : null);
     renderer.render((pass) => {
       painting.draw(pass, paintingMVP, renderer);
       scene.draw(pass, vp.matrix);

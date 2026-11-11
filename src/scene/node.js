@@ -40,7 +40,10 @@ export class SceneNode {
    * @param {Float32Array} [parentWorld]  world matrix of the parent (identity for the root)
    */
   updateWorld(parentWorld) {
-    return todo('SceneNode.updateWorld');
+
+    this.world = parentWorld ? mat4.multiply(parentWorld, this.local) : this.local;
+    this.children.forEach(child => child.updateWorld(this.world));
+    return this;
   }
 
   /** Visit this node and all descendants depth-first: fn(node, depth). */

@@ -24,28 +24,241 @@
  * Call renderer.countDraw(vertexCount) after each draw so the vertex
  * counter in the panel is correct (Part E).
  */
+import meshWGSL from '../render/shaders/mesh.wgsl?raw';
+import { createShader, fragmentConstants } from '../render/shader.js';
+import { DEPTH_FORMAT } from '../render/renderer.js';
+import * as mat4 from '../math/mat4.js';
+import { SceneNode } from './node.js';
+import axesWGSL from '../render/shaders/axes.wgsl?raw';
+import { cube, axes } from './geometry.js';
+
 
 export function createScene({ gpu, renderer, painting, panel }) {
   const { device } = gpu;
+  const module = createShader(device, meshWGSL, 'mesh');
+  const pipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module, entryPoint: 'vs',
+      buffers: [{
+        arrayStride: 6 * 4,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: 'float32x3' },
+          { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' },
+        ],
+      }],
+    },
+    fragment: { module, entryPoint: 'fs', targets: [{ format: gpu.viewFormat }], constants: fragmentConstants(gpu) },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: true, depthCompare: 'less' },
+  });
+
+  const cubeData = cube();
+  const vertexBuffer = device.createBuffer({
+    size: cubeData.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(vertexBuffer, 0, cubeData);
+  const axesModule = createShader(device, axesWGSL, 'axes');
+  const axesPipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: axesModule, entryPoint: 'vs',
+      buffers: [{
+        arrayStride: 6 * 4,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: 'float32x3' },
+          { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' },
+        ],
+      }],
+    },
+    fragment: { module: axesModule, entryPoint: 'fs', targets: [{ format: gpu.viewFormat }], constants: fragmentConstants(gpu) },
+    primitive: { topology: 'line-list' },
+    depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: false, depthCompare: 'always' },
+  });
+  const axesData = axes(0.4);
+  const axesBuffer = device.createBuffer({
+    size: axesData.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+
+  const frustumVertexBuffer = device.createBuffer({
+    size: 24 * 6 * 4,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  const frustumUniformBuffer = device.createBuffer({
+    size: 64,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const frustumBindGroup = device.createBindGroup({
+    layout: axesPipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: frustumUniformBuffer } }],
+  });
+
+  let frustumCorners = null;
+
+
+
+  device.queue.writeBuffer(axesBuffer, 0, axesData);
+
+  function makeObject(color) {
+    const uniformBuffer = device.createBuffer({
+      size: 80,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+    });
+    return { uniformBuffer, bindGroup, color, model: mat4.identity() };
+  }
+
+  const objects = [
+    makeObject([0.9, 0.3, 0.2, 1]),
+    makeObject([0.2, 0.6, 0.9, 1]),
+    makeObject([0.3, 0.8, 0.4, 1]),
+  ];
+
+  const base = new SceneNode('base', mat4.translate(0, -0.3, 0.4));
+  const arm  = base.addChild(new SceneNode('arm', mat4.translate(0, 0.3, 0)));
+  const hand = arm.addChild(new SceneNode('hand', mat4.translate(0, 0.3, 0)));
+  const finger = hand.addChild(new SceneNode('finger', mat4.translate(0, 0.2, 0)));
+  const arm2 = base.addChild(new SceneNode('arm2', mat4.translate(0.3, 0, 0)));
+
+  const nodeColors = {
+  base: [0.9, 0.8, 0.2, 1], arm: [0.9, 0.3, 0.2, 1], hand: [0.2, 0.6, 0.9, 1],
+  finger: [0.3, 0.8, 0.4, 1], arm2: [0.7, 0.4, 0.9, 1],
+  };
+  base.traverse((node) => {
+    node.data.obj = makeObject(nodeColors[node.name]);
+    node.data.size = 0.18;
+    const ub = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    node.data.axes = {
+    uniformBuffer: ub,
+    bindGroup: device.createBindGroup({
+      layout: axesPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: ub } }],
+    }),
+    };
+
+
+  });
+
   const state = {
     debugAxes: false,
+    tx:0, ty:0, tz:0.5,
+    angleX: 0, angleY: 0, angleZ: 0,
+    scale: 0.3,
+    trs: true,
   };
 
   // Example of wiring a control. Add a folder per part as you go.
   const f = panel.folder('Scene');
   f.toggle('debug axes', state, 'debugAxes');
+  f.toggle('T·R·S order', state, 'trs');
+  f.slider('x', state, 'tx', -1, 1, 0.01);
+  f.slider('y', state, 'ty', -1, 1, 0.01);
+  f.slider('z', state, 'tz', -1, 1, 0.01);
+  f.slider('angle X', state, 'angleX', 0, 2 * Math.PI, 0.01);
+  f.slider('angle Y', state, 'angleY', 0, 2 * Math.PI, 0.01);
+  f.slider('angle Z', state, 'angleZ', 0, 2 * Math.PI, 0.01);
+  f.slider('scale', state, 'scale', 0.1, 2, 0.01);
   f.note('Add your objects in src/scene/scene.js.');
+
+  const readoutA = f.text();
+  const readoutB = f.text();
 
   return {
     state,
 
+    setFrustum(corners) {
+      frustumCorners = corners;
+    },
+
     update(dt, time) {
-      // TODO: animate nodes, then root.updateWorld()
+      const T = mat4.translate(state.tx, state.ty, state.tz);
+      const R = mat4.multiply(mat4.rotateX(state.angleX),
+            mat4.multiply(mat4.rotateY(state.angleY), mat4.rotateZ(state.angleZ)));
+      const S = mat4.scale(state.scale, state.scale, state.scale);
+      const MA = mat4.multiply(T, mat4.multiply(R, S));
+      const MB = mat4.multiply(S, mat4.multiply(R, T));
+
+      objects[0].model = state.trs ? MA : MB;
+      objects[1].model = mat4.multiply(mat4.translate(-0.6, 0.3, 0.4), mat4.scale(0.25, 0.25, 0.25));  
+      objects[2].model = mat4.multiply(mat4.translate(0.5, -0.3, 0.1), mat4.scale(0.25, 0.25, 0.25));    
+
+      
+      readoutA.set('T·R·S\n' + mat4.format(MA));
+      readoutB.set('S·R·T\n' + mat4.format(MB));
+
+      arm.local = mat4.multiply(mat4.translate(0, 0.3, 0), mat4.rotateZ(time));
+      base.updateWorld();
     },
 
     /** @param {GPURenderPassEncoder} pass  @param {Float32Array} viewProj  P · V */
     draw(pass, viewProj) {
-      // TODO: one draw per object, with  mvp = viewProj · model
+      pass.setPipeline(pipeline);
+      pass.setVertexBuffer(0, vertexBuffer);
+      for (const o of objects) {
+        const mvp = mat4.multiply(viewProj, o.model);
+        device.queue.writeBuffer(o.uniformBuffer, 0, mvp);
+        device.queue.writeBuffer(o.uniformBuffer, 64, new Float32Array(o.color));
+        pass.setBindGroup(0, o.bindGroup);
+        pass.draw(36);
+        renderer.countDraw(36);
+      }
+      base.traverse((node) => {
+      const s = node.data.size; 
+      const model = mat4.multiply(node.world, mat4.scale(s, s, s));
+      const mvp = mat4.multiply(viewProj, model);
+      device.queue.writeBuffer(node.data.obj.uniformBuffer, 0, mvp);
+      device.queue.writeBuffer(node.data.obj.uniformBuffer, 64, new Float32Array(node.data.obj.color));
+      pass.setBindGroup(0, node.data.obj.bindGroup);
+      pass.draw(36);
+      renderer.countDraw(36);
+      });
+      if (state.debugAxes) {
+        pass.setPipeline(axesPipeline);
+        pass.setVertexBuffer(0, axesBuffer);
+        base.traverse((node) => {
+        const mvp = mat4.multiply(viewProj, node.world);
+        device.queue.writeBuffer(node.data.axes.uniformBuffer, 0, mvp);
+        pass.setBindGroup(0, node.data.axes.bindGroup);
+        pass.draw(6);
+        renderer.countDraw(6);
+        });
+      }
+      if (frustumCorners) {
+        const color = [1.0, 0.9, 0.2]; 
+        const indices = [
+          0,1, 1,2, 2,3, 3,0, 
+          4,5, 5,6, 6,7, 7,4, 
+          0,4, 1,5, 2,6, 3,7  
+        ];
+
+        const vertexData = new Float32Array(24 * 6);
+        let offset = 0;
+        for (const idx of indices) {
+          const pt = frustumCorners[idx];
+          vertexData[offset++] = pt[0];
+          vertexData[offset++] = pt[1];
+          vertexData[offset++] = pt[2];
+          vertexData[offset++] = color[0];
+          vertexData[offset++] = color[1];
+          vertexData[offset++] = color[2];
+        }
+
+        device.queue.writeBuffer(frustumVertexBuffer, 0, vertexData);
+        device.queue.writeBuffer(frustumUniformBuffer, 0, viewProj);
+
+        pass.setPipeline(axesPipeline);
+        pass.setVertexBuffer(0, frustumVertexBuffer);
+        pass.setBindGroup(0, frustumBindGroup);
+        pass.draw(24);
+        renderer.countDraw(24);
+      }
+
+
     },
 
     reset() {

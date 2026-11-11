@@ -10,13 +10,18 @@
  */
 import * as mat4 from '../math/mat4.js';
 import { NotImplemented } from '../math/todo.js';
+import * as vec3 from '../math/vec3.js';
+
 
 export function createCamera() {
   return {
     eye: [0, 0, 2.8],
     target: [0, 0, 0],
     up: [0, 1, 0],
-    fovY: Math.PI / 4, // radians
+    yaw: 0, 
+    pitch: 0, 
+    dist : 2.8, 
+    fovY: Math.PI / 4,
     near: 0.1,
     far: 100,
     projection: 'perspective', // or 'orthographic'
@@ -61,4 +66,45 @@ function fitMatrix(aspect, paintingAspect) {
     0, 0, -0.05, 0,
     0, 0, 0.5, 1,
   ]);
+}
+
+export function frustumCorners(cam, aspect) {
+  const f = vec3.normalize(vec3.sub(cam.target, cam.eye));
+  const r = vec3.normalize(vec3.cross(f, cam.up));
+  const u = vec3.cross(r, f);
+
+  let hNear, hFar;
+  if (cam.projection === 'orthographic') {
+    hNear = cam.orthoHeight / 2;
+    hFar = cam.orthoHeight / 2;
+  } else {
+    const tanHalfFov = Math.tan(cam.fovY / 2);
+    hNear = cam.near * tanHalfFov;
+    hFar = cam.far * tanHalfFov;
+  }
+
+  const wNear = hNear * aspect;
+  const wFar = hFar * aspect;
+
+  const getCornersAt = (d, h, w) => {
+    const center = vec3.add(cam.eye, vec3.scale(f, d));
+
+    const signs = [
+      [-1, 1],
+      [1, 1],
+      [1, -1],
+      [-1, -1],
+    ];
+
+    return signs.map(([sR, sU]) => {
+      const offsetR = vec3.scale(r, sR * w);
+      const offsetU = vec3.scale(u, sU * h);
+      return vec3.add(center, vec3.add(offsetR, offsetU));
+    });
+  };
+
+  return [
+    ...getCornersAt(cam.near, hNear, wNear),
+    ...getCornersAt(cam.far, hFar, wFar),
+  ];
 }
