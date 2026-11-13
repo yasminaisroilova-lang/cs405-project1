@@ -22,7 +22,27 @@ import { todo } from '../math/todo.js';
 
 /** TODO (Part D): build the object above from your curve data. */
 export function curveToJSON(curve) {
-  return todo('curveToJSON');
+  const { painting = 'selim-turbesi', kind = 'bezier-c1', aspect } = curve;
+
+  const toUV = (pt) => {
+    if (typeof aspect === 'number' && aspect > 0) {
+      const u = (pt[0] + aspect) / (2 * aspect);
+      const v = (1 - pt[1]) / 2;
+      return [Number(u.toFixed(4)), Number(v.toFixed(4))];
+    }
+    return [pt[0], pt[1]];
+  };
+
+  const out = { painting, kind };
+
+  if (curve.segments) {
+    out.segments = curve.segments.map((seg) => seg.map(toUV));
+  }
+  if (curve.points) {
+    out.points = curve.points.map(toUV);
+  }
+
+  return out;
 }
 
 /** Provided: save any object as a .json download in the browser. */

@@ -31,6 +31,8 @@ import * as mat4 from '../math/mat4.js';
 import { SceneNode } from './node.js';
 import axesWGSL from '../render/shaders/axes.wgsl?raw';
 import { cube, axes } from './geometry.js';
+import { cubicBezier, c1NextControl, evalPiecewise } from '../math/curves.js';
+import { curveToJSON, downloadJSON } from './curveExport.js';
 
 
 export function createScene({ gpu, renderer, painting, panel }) {
@@ -150,12 +152,14 @@ export function createScene({ gpu, renderer, painting, panel }) {
     angleX: 0, angleY: 0, angleZ: 0,
     scale: 0.3,
     trs: true,
+    showCurve: true,
   };
 
   // Example of wiring a control. Add a folder per part as you go.
   const f = panel.folder('Scene');
   f.toggle('debug axes', state, 'debugAxes');
   f.toggle('T·R·S order', state, 'trs');
+  f.toggle('show curve', state, 'showCurve');
   f.slider('x', state, 'tx', -1, 1, 0.01);
   f.slider('y', state, 'ty', -1, 1, 0.01);
   f.slider('z', state, 'tz', -1, 1, 0.01);
@@ -163,10 +167,54 @@ export function createScene({ gpu, renderer, painting, panel }) {
   f.slider('angle Y', state, 'angleY', 0, 2 * Math.PI, 0.01);
   f.slider('angle Z', state, 'angleZ', 0, 2 * Math.PI, 0.01);
   f.slider('scale', state, 'scale', 0.1, 2, 0.01);
-  f.note('Add your objects in src/scene/scene.js.');
+  
 
   const readoutA = f.text();
   const readoutB = f.text();
+  const controlPoints = [
+    [-0.45, -0.20, 0.01],
+    [-0.45,  0.25, 0.01],
+    [-0.20,  0.45, 0.01],
+    [ 0.00,  0.45, 0.01],
+    [ 0.30,  0.30, 0.01],
+    [ 0.35,  0.05, 0.01],
+    [ 0.45, -0.15, 0.01],
+    [ 0.45, -0.35, 0.01],
+  ];
+  const initialControlPoints = controlPoints.map(p => [...p]);
+
+  function buildSegments(points) {
+    return [
+      [points[0], points[1], points[2], points[3]],
+      [points[3], c1NextControl(points[2], points[3]), points[4], points[5]],
+      [points[5], c1NextControl(points[4], points[5]), points[6], points[7]],
+    ];
+  }
+  const jsonReadout = f.text();
+  f.button('export JSON', () => {
+    const data = curveToJSON({
+      painting: 'selim-turbesi',
+      kind: 'bezier-c1',
+      aspect: painting.aspect,
+      segments: buildSegments(controlPoints),
+    });
+    jsonReadout.set(JSON.stringify(data, null, 2));
+    downloadJSON(data, 'curve.json');
+  });
+  const cpObjects = controlPoints.map(() => makeObject([0.0, 0.85, 1.0, 1.0]));
+
+  const curveVertexBuffer = device.createBuffer({
+    size: 200 * 6 * 4,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  const curveUniformBuffer = device.createBuffer({
+    size: 64,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const curveBindGroup = device.createBindGroup({
+    layout: axesPipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: curveUniformBuffer } }],
+  });
 
   return {
     state,
@@ -257,12 +305,84 @@ export function createScene({ gpu, renderer, painting, panel }) {
         pass.draw(24);
         renderer.countDraw(24);
       }
+      if (state.showCurve) {
+      const segments = buildSegments(controlPoints);
+      const pts = [];
+      for (let i = 0; i <= 100; i++) {
+        pts.push(evalPiecewise(segments, i / 100));
+      }
+
+      const curveColor = [0.2, 0.9, 0.4]; // Grün
+      const curveVertexData = new Float32Array(200 * 6);
+      let cOffset = 0;
+
+      for (let i = 0; i < 100; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        curveVertexData[cOffset++] = a[0];
+        curveVertexData[cOffset++] = a[1];
+        curveVertexData[cOffset++] = a[2];
+        curveVertexData[cOffset++] = curveColor[0];
+        curveVertexData[cOffset++] = curveColor[1];
+        curveVertexData[cOffset++] = curveColor[2];
+
+        curveVertexData[cOffset++] = b[0];
+        curveVertexData[cOffset++] = b[1];
+        curveVertexData[cOffset++] = b[2];
+        curveVertexData[cOffset++] = curveColor[0];
+        curveVertexData[cOffset++] = curveColor[1];
+        curveVertexData[cOffset++] = curveColor[2];
+      }
+
+      device.queue.writeBuffer(curveVertexBuffer, 0, curveVertexData);
+      device.queue.writeBuffer(curveUniformBuffer, 0, viewProj);
+
+      pass.setPipeline(axesPipeline);
+      pass.setVertexBuffer(0, curveVertexBuffer);
+      pass.setBindGroup(0, curveBindGroup);
+      pass.draw(200);
+      renderer.countDraw(200);
+
+      pass.setPipeline(pipeline);
+      pass.setVertexBuffer(0, vertexBuffer);
+      for (let i = 0; i < controlPoints.length; i++) {
+        const pt = controlPoints[i];
+        const cp = cpObjects[i];
+        const model = mat4.multiply(
+          mat4.translate(pt[0], pt[1], 0.01),
+          mat4.scale(0.03, 0.03, 0.03)
+        );
+        const mvp = mat4.multiply(viewProj, model);
+
+        device.queue.writeBuffer(cp.uniformBuffer, 0, mvp);
+        device.queue.writeBuffer(cp.uniformBuffer, 64, new Float32Array(cp.color));
+        pass.setBindGroup(0, cp.bindGroup);
+        pass.draw(36);
+        renderer.countDraw(36);
+      }
+      }
 
 
     },
 
     reset() {
       // TODO: put every object (and the camera, in main.js) back where it started
+      state.debugAxes = false;
+      state.tx = 0;
+      state.ty = 0;
+      state.tz = 0.5;
+      state.angleX = 0;
+      state.angleY = 0;
+      state.angleZ = 0;
+      state.scale = 0.3;
+      state.trs = true;
+      state.showCurve = true;
+
+      for (let i = 0; i < controlPoints.length; i++) {
+        controlPoints[i][0] = initialControlPoints[i][0];
+        controlPoints[i][1] = initialControlPoints[i][1];
+        controlPoints[i][2] = initialControlPoints[i][2];
+      }
     },
   };
 }

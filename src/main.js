@@ -65,7 +65,7 @@ async function main() {
     drag(e) {
       camera.yaw -= e.dx * 0.01;
       camera.pitch += e.dy * 0.01;
-      camera.Math.max(-1.5, Math.min(1.5, camera.pitch));
+      camera.pitch = Math.max(-1.5, Math.min(1.5, camera.pitch));
       const r = camera.dist;
       const x = r * Math.cos(camera.pitch) * Math.sin(camera.yaw);
       const y = r * Math.sin(camera.pitch);
