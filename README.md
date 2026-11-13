@@ -3,7 +3,7 @@
 Interactive WebGPU application that turns a painting from the Sakıp Sabancı Museum collection into a small 3D scene: objects with hand-written 4×4 transformations, a scene graph, an orbit camera with perspective/orthographic projection and an inspection view of the camera frustum, and C¹-continuous piecewise cubic Bézier curves traced over the painting.
 
 **Painting:** Şevket Dağ — *II. Selim Türbesi Kapısı* (`?painting=selim-turbesi`)
-**Report:** `report.pdf` (in this repository) · **Release tag:** `project1-final`
+ · **Release tag:** `project1-final`
 
 No maths or scene-graph libraries are used: `vec3`, `mat4`, curves, camera and scene graph are written from scratch (WebGPU + WGSL, served by Vite).
 
@@ -27,7 +27,7 @@ If the page is blank or black, open the browser console (Cmd/Ctrl + Option/Shift
 |---|---|
 | Left-click + drag | Orbit the camera around the target (yaw / pitch; pitch is limited so `up` never becomes parallel to the view direction) |
 | Scroll wheel | Zoom (distance to target, clamped to 0.5 … 20) |
-| [CONFIRM: drag on a control point] | [CONFIRM: moves the control point in the plane of the painting — describe exactly how your app does it, or delete this row] |
+
 
 On a Mac trackpad, dragging without clicking needs *System Settings → Accessibility → Pointer Control → Trackpad Options → Dragging style → Three Finger Drag*.
 
@@ -53,14 +53,11 @@ On a Mac trackpad, dragging without clicking needs *System Settings → Accessib
 
 **Curves (Part D)**
 - `show curve`: shows or hides the curve and its control points.
-- [CONFIRM or delete each line below, depending on what your application has:]
-- [de Casteljau: slider `t` and the drawn construction levels]
 - [curve type / second curve family: Catmull-Rom spline through the points]
-- [animation: object moving along the curve, oriented by the tangent]
 - `export JSON`: shows the control points as JSON in the panel and downloads `curve.json`.
 
 **View**
-- `reset`: [CONFIRM what it resets in your code — camera, sliders, toggles, control points] back to the defaults.
+- `reset`:back to the defaults.
 
 ## 3. Curve design (Part D)
 
